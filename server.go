@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +43,85 @@ func ping(w http.ResponseWriter, r *http.Request) {
 	_, err := fmt.Fprint(w, responseData(200, map[string]interface{}{"version": "1.0.0"}, "pong"))
 	if err != nil {
 		logrus.Error(err)
+	}
+}
+
+type myMsg struct {
+	Category string
+	Title    string
+	Body     string
+	Copy     string
+	URL      string
+
+}
+
+func myIndex(w http.ResponseWriter, r *http.Request) {
+	var msg myMsg
+	_body, _ := ioutil.ReadAll(r.Body)
+	if json.Unmarshal(_body, &msg) != nil{
+		logrus.Error("请求参数错误")
+		_, err := fmt.Fprint(w, responseString(400, "找不到 Key 对应的 DeviceToken, 请确保 Key 正确! Key 可在 App 端注册获得。"))
+		if err != nil {
+			logrus.Error(err)
+		}
+		return
+	}
+	key := r.Header.Get("Authorization")
+	if key == ""{
+		_, err := fmt.Fprint(w, responseString(400, "找不到 Key 对应的 DeviceToken, 请确保 Key 正确! Key 可在 App 端注册获得。"))
+		if err != nil {
+			logrus.Error(err)
+		}
+		return
+	}
+	category := msg.Category
+	title:=msg.Title
+	body := msg.Body
+
+	deviceToken, err := getDeviceTokenByKey(key)
+	if err != nil {
+		logrus.Errorf("找不到 key 对应的 DeviceToken key: %s", key)
+		_, err = fmt.Fprint(w, responseString(4010, "找不到 Key 对应的 DeviceToken, 请确保 Key 正确! Key 可在 App 端注册获得。"))
+		if err != nil {
+			logrus.Error(err)
+		}
+		return
+	}
+
+
+	if body == "" {
+		body = "无推送文字内容"
+	}
+
+	params := make(map[string]interface{})
+	if msg.Copy != ""{
+		params["automaticallyCopy"] = "1"
+		params["copy"] = msg.Copy
+	}
+
+	if msg.URL != "" {
+		params["url"] = msg.URL
+	}
+
+	logrus.Println(" ========================== ")
+	logrus.Println("key: ", key)
+	logrus.Println("category: ", category)
+	logrus.Println("title: ", title)
+	logrus.Println("body: ", body)
+	logrus.Println("params: ", params)
+	logrus.Println(" ========================== ")
+
+	err = postPush(category, title, body, deviceToken, params)
+	if err != nil {
+		_, err = fmt.Fprint(w, responseString(400, err.Error()))
+		if err != nil {
+			logrus.Error(err)
+		}
+	} else {
+		_, err = fmt.Fprint(w, responseString(200, ""))
+		if err != nil {
+			logrus.Error(err)
+		}
 	}
 }
 
@@ -299,6 +379,8 @@ func runBarkServer() {
 
 	r.Get("/:key/:category/:title/:body", http.HandlerFunc(index))
 	r.Post("/:key/:category/:title/:body", http.HandlerFunc(index))
+
+	r.Post("/mymsgsend", http.HandlerFunc(myIndex))
 
 	err = http.ListenAndServe(addr, r)
 	if err != nil {
